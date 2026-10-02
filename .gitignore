@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# Fetched public files (French data library) are hashed into result bundles, not committed.
+data/fetched/
+# Licensed CRSP/WRDS extracts never enter the repository.
+data/crsp/
+*.sas7bdat
+*.parquet
+crsp*.csv
+CRSP*.csv
