@@ -16,8 +16,6 @@ check of the dual bound for small instances.
 """
 
 import itertools
-import time
-
 import numpy as np
 
 from pf import crt, rw
@@ -39,7 +37,7 @@ def kap(g):
 
 def mom(r):
     """Sample mean and covariance with divisor S."""
-    r = np.asarray(r, float)
+    r = rw.rr(r)
     mu = r.mean(axis=0)
     a = r - mu
     return mu, a.T @ a / r.shape[0]
@@ -47,7 +45,7 @@ def mom(r):
 
 def obj(w, r, g, k, mu=None, Sg=None):
     """mu'w - (g/2) w'Sw + (k/6) mean(y^3) at w."""
-    r = np.asarray(r, float)
+    r = rw.rr(r)
     m0, S0 = mom(r)
     mu = m0 if mu is None else mu
     Sg = S0 if Sg is None else Sg
@@ -59,21 +57,22 @@ def obj(w, r, g, k, mu=None, Sg=None):
 def f5(r, K, g, k=None, e=0.0, dl=1.0, sn="<=", Sg=None, tl=None, gp=0.0, ft=1e-9):
     """Solve F5 with SCIP; returns w, z, the recomputed objective and the certificate (max)."""
     from pyscipopt import Model, quicksum
-    r = np.asarray(r, float)
+    r = rw.rr(r)
+    crt.limits(tl, gp)
     S, N = r.shape
     k = kap(g) if k is None else k
     mu, S0 = mom(r)
-    Sg = S0 if Sg is None else np.asarray(Sg, float)
+    _, Sg = rw.ms(mu, S0 if Sg is None else Sg)
+    if not np.isfinite(g) or not np.isfinite(k):
+        raise ValueError("g and k must be finite")
     a = r - mu
-    sg = 1.0 / np.mean(np.diag(Sg))
+    sg = rw.scale(Sg)
     B = rw.X(N, K, e, dl, sn)
     m = Model()
     m.hideOutput()
     m.setParam("numerics/feastol", ft)
     m.setParam("limits/gap", gp)
     m.setParam("limits/absgap", 0.0)
-    if tl is not None:
-        m.setParam("limits/time", float(tl))
     w = [m.addVar(f"w{i}", lb=0.0, ub=float(B["ub"][i])) for i in range(N)]
     z = [m.addVar(f"z{i}", vtype="B") for i in range(N)]
     rw.scip(m, B, w + z)
@@ -87,9 +86,7 @@ def f5(r, K, g, k=None, e=0.0, dl=1.0, sn="<=", Sg=None, tl=None, gp=0.0, ft=1e-
           + (k * sg / (6.0 * S)) * quicksum(y[s] ** 3 for s in range(S)))
     m.addCons(q <= ex)
     m.setObjective(q, "maximize")
-    t0 = time.perf_counter()
-    m.optimize()
-    c = crt.un(crt.sc(m, "max", t=time.perf_counter() - t0), sg)
+    c = crt.un(crt.so(m, "max", tl), sg)
     if m.getNSols() == 0:
         return {"w": None, "z": None, "f": np.nan, "c": c}
     s0 = m.getBestSol()
@@ -98,21 +95,30 @@ def f5(r, K, g, k=None, e=0.0, dl=1.0, sn="<=", Sg=None, tl=None, gp=0.0, ft=1e-
     return {"w": W, "z": Z, "f": obj(W, r, g, k, mu, Sg), "c": c}
 
 
-def grid(r, K, g, k=None, e=0.0, dl=1.0, h=0.01, Sg=None):
-    """Best objective over weights in multiples of h on every support of size <= K (N <= 12)."""
-    r = np.asarray(r, float)
+def grid(r, K, g, k=None, e=0.0, dl=1.0, h=0.01, Sg=None, sn="<="):
+    """Best objective over the lattice in X(K), with step h (N <= 12, K <= 3)."""
+    r = rw.rr(r)
     N = r.shape[1]
+    N, K = rw.nk(N, K, sn)
     if N > 12 or K > 3:
         raise ValueError("the grid check is for N <= 12 and K <= 3")
     k = kap(g) if k is None else k
     mu, S0 = mom(r)
-    Sg = S0 if Sg is None else np.asarray(Sg, float)
+    _, Sg = rw.ms(mu, S0 if Sg is None else Sg)
+    if not np.isfinite(g) or not np.isfinite(k):
+        raise ValueError("g and k must be finite")
     e, dl = rw.ed(N, e, dl)
     a = r - mu
+    if not np.isfinite(h) or not 0 < h <= 1 or not np.isclose(1 / h, round(1 / h),
+                                                           rtol=0, atol=1e-10):
+        raise ValueError("h must be the reciprocal of a positive integer")
     n = round(1 / h)
     best, arg = -np.inf, None
-    for m in range(1, K + 1):
-        c = [x for x in itertools.product(range(1, n), repeat=m - 1) if sum(x) < n]
+    sizes = range(1, K + 1) if sn == "<=" else (K,)
+    for m in sizes:
+        counts = range(1, n) if sn == "<=" else range(n + 1)
+        c = [x for x in itertools.product(counts, repeat=m - 1)
+             if sum(x) < n or (sn == "==" and sum(x) == n)]
         c = np.array(c, dtype=float).reshape(len(c), m - 1)
         V = np.c_[c, n - c.sum(axis=1)] * h                # lattice points of the m-simplex
         for sup in itertools.combinations(range(N), m):

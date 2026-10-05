@@ -1,13 +1,12 @@
 # Sparse-Portfolio-Model
 
-Cardinality-constrained portfolio models with solver bounds, independent numerical checks,
-and an evaluation framework for long-horizon outcomes on a universe that includes delisted firms.
+Cardinality-constrained portfolio models with solver bounds, independent checks and a
+framework for evaluating long-horizon outcomes on a universe that includes delisted firms.
 
 The repository implements mean–variance, perspective mean–variance, absolute-deviation,
 CVaR, restricted index-tracking and third-central-moment formulations. Public benchmark
-results test the implementation. **No CRSP empirical result has been produced.** The owner
-will supply the licensed extract separately; the replication and empirical comparison phases
-remain blocked until then.
+results test the implementation. No CRSP empirical result has been produced; replication
+and empirical comparison await the owner's licensed extract.
 
 ## Background
 
@@ -24,7 +23,7 @@ survivorship bias into an evaluation of stock selection. Rebalancing also change
 distribution of compound returns, so a small rebalanced portfolio and a small buy-and-hold
 portfolio answer different questions.
 [Bessembinder (2018)](https://doi.org/10.1016/j.jfineco.2018.06.004),
-[Farago and Hjalmarsson (2023)](https://doi.org/10.1093/rapstu/raac020).
+[Farago and Hjalmarsson (2023)](https://doi.org/10.1093/rof/rfac021).
 
 This project asks whether optimizing a limited set of holdings changes the probability of
 underperforming the value-weighted market or Treasury bills, and how much the answer depends
@@ -42,10 +41,9 @@ on the risk measure and the eligible universe. It makes no claim of priority ove
 | F4 | lexicographic regression tracking, zero costs | HiGHS | regression and tracking error from returns |
 | F5 | mean, variance and third central moment | SCIP | exhaustive small-support simplex grid |
 
-The [model](docs/MODEL.md) states the equations and restrictions. F4 follows the owner's
-fully invested, zero-cost restriction and therefore has no identical target in the paper's
-transaction-cost table. F5 is a utility in central moments; its default coefficients do not
-make it a literal CRRA Taylor expansion about unit wealth.
+The [model](docs/MODEL.md) states the equations and source restrictions. F4 has no identical
+target in the paper's transaction-cost table. F5's default central-moment coefficients do
+not give a literal CRRA Taylor expansion about unit wealth.
 
 [Validation](docs/VALIDATION.md) records the gates and checks;
 [benchmark tables](docs/results/README.md) are generated from result bundles carrying the
@@ -77,9 +75,8 @@ universes and support computational validation only. The French risk-free file i
 at runtime; CRSP data must remain outside the repository. [Data](docs/DATA.md) defines the
 accepted schema and delisting treatment.
 
-`run_boot.py` is the Bessembinder replication entry point; `run_oos.py` is the empirical
-comparison entry point. Both stop without a licensed extract. Read the
-[pre-registration](docs/PLAN.md) before either empirical run. Synthetic fixtures test
-arithmetic, selection timing and numerical properties; they support no investment claim.
+`run_boot.py` runs the Bessembinder replication; `run_oos.py` runs empirical comparisons.
+Both require the licensed extract and follow the [pre-registration](docs/PLAN.md).
+Synthetic fixtures test arithmetic, selection timing and numerical properties only.
 
 Code: [MIT](LICENSE). OR-Library data: [separate MIT notice](data/orlib/LICENSE).

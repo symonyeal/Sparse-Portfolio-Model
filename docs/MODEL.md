@@ -40,23 +40,25 @@ the indicator count is not the holding count (`rw.nz`). The return row $\mu^\top
 | F4 | lexicographic: $\min\lvert a^\top w\rvert$, then $\min\lvert b^\top w - 1\rvert$ | MILP ×2 | Canakgoz and Beasley (2009) eqs. (1)–(11), (16)–(26) | `it.it` |
 | F5 | $\max \mu^\top w - \frac\gamma2 w^\top\Sigma w + \frac\kappa6\cdot\frac1S\sum_s y_s^3$ | nonconvex MINLP | Harvey et al. (2010) eqs. (3)–(6) | `sk.f5` |
 
-**F1.** The quadratic enters through an epigraph $v \ge w^\top\Sigma w$; SCIP takes a linear
-objective. The objective is multiplied by $1/\overline{\operatorname{diag}\Sigma}$ before the solve
-and the certificate divided back: SCIP's tolerances are absolute below one, and at weekly-return
-scale an unscaled epigraph left $9\times10^{-10}$ between the recomputed variance and the bound.
+F1 uses an epigraph $v \ge w^\top\Sigma w$ and a linear SCIP objective. The objective is
+multiplied by $1/\overline{\operatorname{diag}\Sigma}$ and the certificate divided back;
+deterministic returns retain scale one. SCIP's tolerances are absolute below one: at
+weekly-return scale an unscaled epigraph left $9\times10^{-10}$ between the recomputed
+variance and the bound.
 
-**F1p.** $\pi = \theta\,\lambda_{\min}(\Sigma)\mathbf 1$ with $\theta = 0.999$. Günlük and
+F1p uses $\pi = \theta\,\lambda_{\min}(\Sigma)\mathbf 1$ with $\theta = 0.999$; singular
+positive-semidefinite covariance gives $\pi=0$. Günlük and
 Linderoth use $\pi = (\lambda_{\min} - 0.001)\mathbf 1$; at return scale $\lambda_{\min}
 \approx 10^{-4}$ and that $\pi$ is negative.
 
-**F2.** The source's epigraph form replaces the specification's split
+F2 uses the source's epigraph form in place of the specification's split
 $d^+_s - d^-_s = y_s$; the two are equivalent.
 
-**F4.** $r_{it} = \log(V_{it}/V_{i,t-1})$, $R_t = \log(I_t/I_{t-1})$, and $(a_i, b_i)$ are OLS
-coefficients of $r_i$ on $R$ with an intercept. Stage 2 holds $\lvert a^\top w - a^\ast\rvert \le
+F4 uses $r_{it} = \log(V_{it}/V_{i,t-1})$, $R_t = \log(I_t/I_{t-1})$, and OLS coefficients
+$(a_i, b_i)$ of $r_i$ on $R$ with an intercept. Stage 2 holds $\lvert a^\top w - a^\ast\rvert \le
 10^{-9}$, a project setting (the source says only that $\epsilon$ is small).
 
-**F5.** $\frac1S\sum_s y_s^3$ is the sample third central moment of $r^\top w$. The default
+F5 uses the sample third central moment $\frac1S\sum_s y_s^3$ of $r^\top w$. The default
 $\kappa = \gamma(\gamma+1)$ is $U'''(1)/U'(1)$ for CRRA utility at unit wealth. Jondeau and
 Rockinger (2006) expand about the expected wealth $1 + \mu^\top w$, so the coefficients agree
 with theirs only to first order in $\mu^\top w$.
@@ -82,6 +84,8 @@ summed over the share classes of a PERMCO. $\mathcal T$ is the smallest set of t
 sum reaches the net total (`wc.top`). Returns combine as $(1+\text{RET})(1+\text{DLRET})-1$.
 
 ## 6. Algorithms and independent checks
+
+Grid values are feasible lower bounds, not certificates of global optimality.
 
 | Model | Reference route | Independent route |
 | --- | --- | --- |

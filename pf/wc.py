@@ -49,6 +49,11 @@ def comb(ret, dl, dc, ex, fill=False):
     """Combined monthly return and the count of Shumway fills applied."""
     ret, dl = np.asarray(ret, float), np.asarray(dl, float).copy()
     dc = np.asarray(dc)
+    if not (ret.shape == dl.shape == dc.shape == np.asarray(ex).shape):
+        raise ValueError("delisting arrays disagree in shape")
+    for x in (ret, dl):
+        if np.isinf(x).any() or np.any(x[~np.isnan(x)] < -1):
+            raise ValueError("return must be missing or finite and at least -1")
     n = 0
     if fill:
         m = np.isnan(dl) & perf(dc, ex)
@@ -67,7 +72,9 @@ def FV(rf):
 def wc(I, R, rf):
     """Bessembinder eq. (3) for one stock: I, R, rf aligned month by month to the horizon end."""
     I, R, rf = (np.asarray(x, float) for x in (I, R, rf))
-    if np.isnan(I).any() or np.isnan(R).any():
+    if I.ndim != 1 or not (I.shape == R.shape == rf.shape):
+        raise ValueError("wealth-creation arrays disagree in shape")
+    if not all(np.isfinite(x).all() for x in (I, R, rf)):
         raise ValueError("wealth creation needs every month's value and return; none is zero")
     return float(np.sum(I * (R - rf) * FV(rf)))
 
@@ -81,6 +88,10 @@ def firm(W, pc):
 def top(W):
     """Indices of the smallest set of largest W whose sum reaches sum(W) (Bessembinder's T)."""
     W = np.asarray(W, float)
+    if W.ndim != 1 or not np.isfinite(W).all():
+        raise ValueError("wealth creation must be a finite vector")
+    if W.size == 0 or W.sum() <= 0:
+        return np.array([], dtype=int)
     o = np.argsort(-W, kind="stable")
     c = np.cumsum(W[o])
     k = int(np.argmax(c >= W.sum() - 1e-9 * max(1.0, abs(W.sum())))) + 1

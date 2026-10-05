@@ -96,7 +96,8 @@ def lp(c, A, lo, hi, lb, ub, tl, ps):
         l, u = r.lower.marginals, r.upper.marginals
         ds = np.asarray(A[eq].T @ y + D.T @ v).ravel() + l + u
         er = np.max(np.abs(ds - c))
-        if er > TOL * max(1.0, np.abs(c).max()) or np.any(v > TOL) or np.any(l < -TOL) or np.any(u > TOL):
+        if (er > TOL * max(1.0, np.abs(c).max()) or np.any(v > TOL)
+                or np.any(l < -TOL) or np.any(u > TOL)):
             raise ValueError("LP solver marginals are not dual feasible")
         fl, fu = np.isfinite(lb), np.isfinite(ub)
         if np.any(np.abs(l[~fl]) > TOL) or np.any(np.abs(u[~fu]) > TOL):
@@ -185,6 +186,8 @@ def so(m, sn, tl=None):
     limits(tl)
     if tl == 0:
         return C("limit", sn, t=0.0, ps=True, msg="time limit before solve")
+    if tl is not None:
+        m.setParam("limits/time", float(tl))
     t0 = time.perf_counter()
     m.optimize()
     first = str(m.getStatus())

@@ -76,15 +76,20 @@ def ed(N, e, d):
     return e, d
 
 
-def X(N, K, e=0.0, d=1.0, sn="<="):
-    """Rows, row bounds, column bounds and integrality of X(K) over x = [w, z]."""
+def nk(N, K, sn):
+    """Validated asset count, cardinality and cardinality sense."""
     if sn not in SN:
         raise ValueError(f"cardinality sense {sn!r} not in {SN}")
     if not np.isfinite(N) or int(N) != N or N < 1:
         raise ValueError("N must be a positive integer")
     if not (1 <= K <= N) or int(K) != K:
         raise ValueError(f"need integer 1 <= K <= N, got K={K}, N={N}")
-    N, K = int(N), int(K)
+    return int(N), int(K)
+
+
+def X(N, K, e=0.0, d=1.0, sn="<="):
+    """Rows, row bounds, column bounds and integrality of X(K) over x = [w, z]."""
+    N, K = nk(N, K, sn)
     e, d = ed(N, e, d)
     I = sparse.identity(N, format="csr")
     A = sparse.vstack([
@@ -158,9 +163,6 @@ def ok(w, z, K, e=0.0, d=1.0, sn="<=", tol=1e-7):
     N = w.size
     e, d = ed(N, e, d)
     v = []
-    if z.size != N:
-        v.append("w and z differ in length")
-        return v
     if np.any(np.abs(z - np.round(z)) > tol) or np.any((np.round(z) != 0) & (np.round(z) != 1)):
         v.append("z not binary")
     zb = np.round(z)

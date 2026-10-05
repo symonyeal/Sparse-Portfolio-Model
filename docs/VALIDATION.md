@@ -9,11 +9,9 @@ budget; the original transaction-cost results are not targets for this restricti
 
 ## Algorithms
 
-F1/F1p use SCIP. F1 also has independent extended cutting-plane bounds from HiGHS MILP
-masters. F2/F3 recompute their risk measure directly from the returned weights. F4 recomputes
-OLS coefficients and tracking error. F5 compares its maximizing dual bound with every point
-of a small-support simplex grid. Grid points are feasible lower bounds, not certificates of
-global optimality.
+The [model](MODEL.md#6-algorithms-and-independent-checks) lists reference and independent
+routes. Each check recomputes from data and returned weights rather than rebuilding the
+optimization rows.
 
 ## Gates
 
@@ -32,11 +30,26 @@ at the printed mean is reported separately from agreement with the rectangle def
 rounding both coordinates. A test that accepts a larger unexplained tolerance cannot
 establish the printed-precision gate.
 
+G1 is not met on portef1: 142 of 2,000 printed rectangles do not intersect the KKT-certified
+frontier. The maximum separation is $8.960743692193462\times10^{-11}$; the maximum KKT
+residual is $1.3322676295501878\times10^{-15}$. Raw coordinate differences remain reported.
+The strict gate is an expected test failure while the discrepancy remains unresolved.
+
 ## Computation
 
 The authoritative measured tables are [generated from admitted bundles](results/README.md).
 Each bundle records code, input hashes, parameters and host. Tables must reject stale
 bundles; a clean source digest alone cannot establish that the inputs still match.
 
-The final local verification record and benchmark coverage are added after the fresh run.
 No CRSP or out-of-sample empirical run has been performed.
+
+## Verification (5 October 2026)
+
+The full local suite reports 142 passed and one expected failure for G1. Ruff, dependency
+consistency and active documentation links pass. Regression checks cover data validation,
+selection timing, delisting, solver deadlines and bounds, bundle admission and runner inputs.
+
+Ordinary deterministic solver fixtures retain their weights and recomputed objectives after
+cleanup; timing and certificate metadata are excluded from that comparison. Corrections
+cover singular and deterministic inputs, tiny CVaR tails, unavailable observations and
+numerical cancellation in Sharpe inference.

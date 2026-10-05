@@ -49,6 +49,11 @@ def test_zero_deadline_starts_no_solve(fn):
     assert d["c"]["st"] == "limit" and d["w"] is None
 
 
+def test_zero_deadline_does_not_return_an_unchecked_warm_start():
+    d = mv.f1([0.01, 0.02], np.eye(2), 1, 1.0, tl=0, sol=([1, 0], [1, 0]))
+    assert d["w"] is None and np.isnan(d["c"]["f"])
+
+
 def test_ecp_retains_dual_bound_without_incumbent(monkeypatch):
     def mi(*a, **k):
         return None, crt.C("limit", "min", bd=0.25, rg=np.inf)
@@ -94,3 +99,8 @@ def test_shrink_handles_one_asset_and_constant_series():
     assert S.shape == (1, 1) and S[0, 0] == pytest.approx(0.0001) and dl == 0
     S, dl = mv.shrink([[0.01, 0.02], [0.03, 0.02]])
     assert np.isfinite(S).all() and np.allclose(S[1], 0) and 0 <= dl <= 1
+
+
+def test_cvar_preserves_tiny_fractional_tail_atoms():
+    b = np.nextafter(1.0, 0.0)
+    assert cv.cvar([[-0.4], [-0.2]], [1.0], b) == pytest.approx(0.4)

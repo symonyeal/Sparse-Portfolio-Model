@@ -37,9 +37,16 @@ def ecp(mu, S, K, lam, e=0.0, d=1.0, sn="<=", rho=None, rs="==", tol=1e-8, it=20
     The tail converges slowly: on port1 with K = 10 and lam = 1, 2,000 masters left a relative
     bracket of 1.1e-6. A limit returns status `limit` with both bounds.
     """
-    mu, S = np.asarray(mu, float), np.asarray(S, float)
+    mu, S = rw.ms(mu, S)
+    crt.limits(tl)
+    if not 0 <= lam <= 1:
+        raise ValueError("lam must lie in [0, 1]")
+    if not np.isfinite(tol) or tol < 0 or not np.isfinite(ga) or ga <= 0:
+        raise ValueError("tol must be finite and nonnegative; ga must be finite and positive")
+    if not np.isfinite(it) or int(it) != it or it < 0:
+        raise ValueError("it must be a nonnegative integer")
     N = mu.size
-    sg = 1.0 / np.mean(np.diag(S))
+    sg = rw.scale(S)
     Ss, ms = sg * S, sg * mu
     B = rw.pad(rw.X(N, K, e, d, sn), 1)
     if rho is not None:
@@ -56,12 +63,12 @@ def ecp(mu, S, K, lam, e=0.0, d=1.0, sn="<=", rho=None, rs="==", tol=1e-8, it=20
         A = sparse.vstack([B["A"], sparse.csr_matrix(G)], format="csr")
         lo = np.r_[B["lo"], [-(w @ Ss @ w) for w in P]]
         hi = np.r_[B["hi"], np.full(len(P), np.inf)]
-        r = None if tl is None else max(tl - (time.perf_counter() - t0), 1e-3)
+        r = None if tl is None else max(tl - (time.perf_counter() - t0), 0.0)
         x, cm = crt.mi(c, A, lo, hi, l, u, itg, tl=r, gp=0.0)
+        lb = max(lb, cm["bd"])
         if x is None:
             st = cm["st"]
             break
-        lb = max(lb, cm["bd"])
         w = x[:N]
         f = sg * mv.obj(w, mu, S, lam)
         if f < ub:

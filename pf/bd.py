@@ -1,11 +1,4 @@
-"""Result bundles: what a stored result carries to be reproduced and admitted.
-
-A bundle is a case's result with the key `bundle`: the case key and parameters, the code
-identity (full commit, dirty flag, SHA-256 over the executed sources with CRLF read as LF),
-the SHA-256 of every input file, the command, the host and the library versions. Prose (*.md)
-and stored results do not mark a revision dirty. A bundle is admitted only if its source digest
-and parameters match the current code and case; `--missing` reruns anything else.
-"""
+"""Atomic result bundles with code, parameters, input hashes and host identity."""
 
 import hashlib
 import json
@@ -34,7 +27,8 @@ def _sha(p):
 
 def digest(x):
     """SHA-256 of a JSON-serialisable value, keys sorted."""
-    return hashlib.sha256(json.dumps(plain(x), sort_keys=True, allow_nan=False).encode()).hexdigest()
+    raw = json.dumps(plain(x), sort_keys=True, allow_nan=False).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def source(root=ROOT):

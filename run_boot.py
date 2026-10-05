@@ -21,6 +21,7 @@ from pf import bd, bs, bt, dat
 # Legend
 # P0 : panel; I : beginning-of-month market value; Rp : bootstrap portfolio returns
 # n : replications; K : stocks per month; L : months linked for the 1- and 10-year outcomes
+# prev, first : preceding valuation month and initial beginning-of-month values
 
 OUT = Path("docs/results/boot")
 SPAN = (192607, 201612)
@@ -31,19 +32,15 @@ def outcomes(Rp, rf, vw, L, g):
     """Linked return per replication over L months from a start drawn uniformly per replication
     (docs/PLAN.md: the source does not state its windows), and over the whole span."""
     n, Tm = Rp.shape
+    if (L < 1 or L > Tm or np.asarray(rf).shape != (Tm,)
+            or np.asarray(vw).shape != (Tm,)):
+        raise ValueError("bootstrap horizon or benchmark shape is invalid")
     s = g.integers(0, Tm - L + 1, n)
     idx = s[:, None] + np.arange(L)
     x = np.prod(1 + np.take_along_axis(Rp, idx, axis=1), axis=1) - 1
     f = np.prod(1 + rf[idx], axis=1) - 1
     m = np.prod(1 + vw[idx], axis=1) - 1
     return x, f, m
-
-
-def stats(x, f, m):
-    z = (x - x.mean()) / x.std()
-    return {"mean": float(x.mean()), "med": float(np.median(x)), "skew": float(np.mean(z ** 3)),
-            "gt0": float(np.mean(x > 0)), "gtf": float(np.mean(x > f)),
-            "gtvw": float(np.mean(x > m))}
 
 
 def main(argv=None):
@@ -57,29 +54,45 @@ def main(argv=None):
     x = a.parse_args(argv)
     if not x.crsp:
         raise SystemExit("no CRSP extract supplied (--crsp): P5 is blocked; see docs/PLAN.md")
+    if x.n < 1 or min(x.sizes) < 1 or x.seed < 0:
+        a.error("positive draw sizes and replications, and a nonnegative seed, are required")
     code = bd.identity()
     if code["dirty"]:
         raise SystemExit("refusing to write bundles from a dirty tree; commit first")
     rows = dat.crsp(x.crsp)
     rfd = dat.rf(x.rf)
-    P0, _ = bt.panel(rows, rfd, fill=False)
-    k = (P0.mo >= SPAN[0]) & (P0.mo <= SPAN[1])
-    I = np.vstack([np.full(P0.R.shape[1], np.nan), P0.ME[:-1]])[k]
-    R, rf = P0.R[k], P0.rf[k]
+    y, m = divmod(SPAN[0], 100)
+    prev = (y - 1) * 100 + 12 if m == 1 else y * 100 + m - 1
+    p = rows["mo"] == prev
+    if not p.any():
+        raise SystemExit(f"CRSP extract needs the preceding month's valuation rows ({prev})")
+    k = (rows["mo"] >= SPAN[0]) & (rows["mo"] <= SPAN[1])
+    if not np.array_equal(np.unique(rows["mo"][k]), dat.mseq(*SPAN)):
+        raise SystemExit("CRSP extract must cover the complete registered replication span")
+    cut = {c: v[k] if isinstance(v, np.ndarray) else v for c, v in rows.items()}
+    P0, _ = bt.panel(cut, rfd, fill=False)
+    first = dict(zip(rows["PERMNO"][p], np.abs(rows["PRC"][p]) * rows["SHROUT"][p]))
+    initial = np.array([first.get(i, np.nan) for i in P0.ids])
+    if not np.any(np.isfinite(initial) & (initial > 0) & np.isfinite(P0.R[0])):
+        raise SystemExit("CRSP extract needs usable preceding-month valuations")
+    I = np.vstack([initial, P0.ME[:-1]])
+    R, rf = P0.R, P0.rf
     vw = bs.vw(R, I)
-    ip = {"crsp": rows["sha"], "rf": rfd["sha"], "rf_vintage": rfd["vintage"]}
+    ip = {"crsp": rows["sha"], "rf": rfd["sha"], "rf_vintage": rfd["vintage"],
+          "plan": dat.sha256(Path(__file__).parent / "docs/PLAN.md")}
     for K in x.sizes:
         key = f"boot-K{K}"
-        pa = {"K": K, "n": x.n, "seed": x.seed, "span": SPAN}
-        if x.missing and bd.valid(OUT, key, pa, code["source"]):
+        pa = {"K": K, "n": x.n, "seed": x.seed, "span": SPAN, "valuation": prev}
+        if x.missing and bd.valid(OUT, key, pa, code["source"], ip):
             continue
         g = np.random.default_rng([x.seed, K])
         Rp = bs.draw(R, I, K, x.n, g)
-        r = {"life": stats(np.prod(1 + Rp, axis=1) - 1,
-                           np.full(x.n, np.prod(1 + rf) - 1), np.full(x.n, np.prod(1 + vw) - 1))}
+        r = {"life": bs.stats(np.prod(1 + Rp, axis=1) - 1,
+                              np.full(x.n, np.prod(1 + rf) - 1), np.full(x.n, np.prod(1 + vw) - 1))}
         for h, L in HZ.items():
-            r[h] = stats(*outcomes(Rp, rf, vw, L, g))
-        bd.write(OUT, bd.bundle(key, pa, r, ip, sys.argv, code))
+            r[h] = bs.stats(*outcomes(Rp, rf, vw, L, g))
+        cmd = sys.argv if argv is None else [str(Path(__file__).name), *argv]
+        bd.write(OUT, bd.bundle(key, pa, r, ip, cmd, code))
         print(key, r["life"], flush=True)
 
 

@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -243,7 +244,18 @@ def _cell(x):
     x = x.strip()
     if x.upper() in MISS:
         return np.nan, x.upper() or "blank"
-    return float(x), None
+    v = float(x)
+    if not np.isfinite(v):
+        raise ValueError("nonfinite cell")
+    return v, None
+
+
+def _integer(x):
+    """Parse an integer without silently truncating decimal cells."""
+    v = float(x)
+    if not np.isfinite(v) or not v.is_integer() or not -(2 ** 63) <= v < 2 ** 63:
+        raise ValueError("invalid integer")
+    return int(v)
 
 
 def crsp(path, shr=(10, 11, 12)):
@@ -256,7 +268,10 @@ def crsp(path, shr=(10, 11, 12)):
     p = Path(path)
     with p.open(newline="", encoding="utf-8-sig") as fh:
         rd = csv.reader(fh)
-        hd = [c.strip().upper() for c in next(rd)]
+        header = next(rd, None)
+        if header is None:
+            raise DataError(f"{p}: empty extract")
+        hd = [c.strip().upper() for c in header]
         hd = ["DATE" if c in ("DATE", "MTHCALDT") else c for c in hd]
         if sorted(hd) != sorted(COLS) or len(set(hd)) != len(hd):
             ex = sorted(set(hd) - set(COLS))
@@ -275,23 +290,41 @@ def crsp(path, shr=(10, 11, 12)):
             raise DataError(f"{p}: row {k + 2} has {len(r)} fields")
         for c, a in ii.items():
             try:
-                a[k] = int(float(r[ix[c]]))
-            except ValueError:
-                raise DataError(f"{p}: row {k + 2} {c}={r[ix[c]]!r}") from None
+                a[k] = _integer(r[ix[c]])
+                if c in ("PERMNO", "PERMCO") and a[k] <= 0:
+                    raise ValueError("nonpositive identifier")
+            except (ValueError, OverflowError):
+                raise DataError(f"{p}: row {k + 2} invalid {c}") from None
         d = r[ix["DATE"]].strip().replace("-", "").replace("/", "")
-        if len(d) != 8 or not d.isdigit():
-            raise DataError(f"{p}: row {k + 2} date {r[ix['DATE']]!r} is not YYYYMMDD")
+        try:
+            if len(d) != 8 or not d.isdigit():
+                raise ValueError("invalid format")
+            date(int(d[:4]), int(d[4:6]), int(d[6:]))
+        except ValueError:
+            raise DataError(f"{p}: row {k + 2} invalid DATE") from None
         mo[k] = int(d[:6])
         for c, a in o.items():
-            v, cd = _cell(r[ix[c]])
+            try:
+                v, cd = _cell(r[ix[c]])
+                if (c in ("RET", "DLRET") and v < -1) or (c == "SHROUT" and v < 0):
+                    raise ValueError("invalid value")
+            except (ValueError, OverflowError):
+                raise DataError(f"{p}: row {k + 2} invalid {c}") from None
             a[k] = v
             if c in code:
                 code[c][k] = cd or ""
         x = r[ix["DLSTCD"]].strip()
-        dl[k] = int(float(x)) if x not in ("", ".") else 0
+        try:
+            dl[k] = _integer(x) if x not in ("", ".") else 0
+            if dl[k] < 0:
+                raise ValueError("negative code")
+        except (ValueError, OverflowError):
+            raise DataError(f"{p}: row {k + 2} invalid DLSTCD") from None
     keep = np.isin(ii["SHRCD"], shr)
     out = dict(mo=mo, dl=dl, **ii, **o, RETc=code["RET"], DLRETc=code["DLRET"])
     out = {c: v[keep] for c, v in out.items()}
+    if not out["mo"].size:
+        raise DataError(f"{p}: no rows with the requested share codes")
     k = np.lexsort((out["PERMNO"], out["mo"]))
     out = {c: v[k] for c, v in out.items()}
     dup = (np.diff(out["mo"]) == 0) & (np.diff(out["PERMNO"]) == 0)

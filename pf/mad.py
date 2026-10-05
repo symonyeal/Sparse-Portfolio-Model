@@ -26,7 +26,7 @@ from pf import crt, rw
 
 def mad(r, K, rho=None, e=0.0, dl=1.0, sn="<=", tl=None, gp=0.0):
     """Solve F2; returns w, z, the recomputed deviation and the certificate."""
-    r = np.asarray(r, float)
+    r = rw.rr(r)
     S, N = r.shape
     mu = r.mean(axis=0)
     a = r - mu

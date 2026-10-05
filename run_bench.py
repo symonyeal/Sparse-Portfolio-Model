@@ -1,11 +1,12 @@
-"""Benchmark cases on public data (D1, D2): gates G1, G2, the Chang comparison, RQ5, F2-F5 checks.
+"""Public benchmark gates G1, G2, Chang, RQ5 and F2-F5 checks.
 
-    python run_bench.py                 tables only, from the stored bundles (docs/results/README.md)
+    python run_bench.py                 tables from admitted bundles
     python run_bench.py --run           run every case, then the tables
         --missing                       only cases with no admitted bundle (stale ones rerun)
         --only PREFIX                   only cases whose key starts with PREFIX (repeatable)
         --time S                        per-solve time limit in seconds (default 60)
         --jobs N                        N cases at a time (times are then under shared load)
+        --allow-long                    permit a batch with a solve budget above 30 minutes
 
 Each case writes docs/results/bench/<key>.json as it finishes, so a stopped run loses only the
 cases in flight. Cases refuse to write into docs/results from a dirty tree.
@@ -13,7 +14,6 @@ cases in flight. Cases refuse to write into docs/results from a dirty tree.
 
 import argparse
 import concurrent.futures as cf
-import json
 import sys
 import time
 from pathlib import Path
@@ -25,6 +25,8 @@ from pf import bd, cv, dat, ecp, it, mad, mv, rw, sk
 # Legend
 # key, kd, pa : case key, kind and parameters; r : result record; ip : input hashes
 # lam : Chang's weight; K, e : cardinality and floor; tl : per-solve time limit (s)
+# ip : current pinned input hashes; kd : case kind; src : current source digest
+# budget : sum of solve limits, excluding data loading and continuous G1 solves
 
 OUT = Path("docs/results/bench")
 LAM = [(e - 1) / 49 for e in range(1, 51)]          # Chang et al. (2000): E = 50
@@ -51,6 +53,24 @@ def crt(c):
     return {k: c.get(k) for k in ("st", "f", "bd", "g", "nd", "t", "rt", "it")}
 
 
+def inputs(kd, pa):
+    """Current input hashes for a public case, checked against OR-Library pins."""
+    k = pa["k"]
+    names = [f"port{k}"] if kd in ("g1", "chang", "g2", "rq5") else [f"indtrack{k}"]
+    if kd in ("g1", "chang"):
+        names.append(f"portef{k}")
+    pins = dat.pins()
+    ip = {n: dat.sha256(dat.ORLIB / f"{n}.txt") for n in names}
+    if any(h != pins[f"{n}.txt"] for n, h in ip.items()):
+        raise dat.DataError("benchmark input does not match its SHA-256 pin")
+    return ip
+
+
+def admit(key, kd, pa, tl, src):
+    """Admit a case through the same code, parameter and input checks for tables and resume."""
+    return bd.valid(OUT, key, pa | {"tl": tl}, src, inputs(kd, pa), root=bd.ROOT)
+
+
 def run(key, kd, pa, tl):
     p = dict(pa)
     if kd in ("g1", "chang", "g2", "rq5"):
@@ -64,16 +84,24 @@ def run(key, kd, pa, tl):
     if kd == "g1":
         e = dat.portef(p["k"])
         ip[e["name"]] = e["sha"]
-        F0, dv, kt = np.ones(mu.size), [], []
+        F0, dv, kt, sep = np.ones(mu.size), [], [], []
         for x, v in e["ef"]:
             q = mv.qp(mu, S, x, F0, it=5 * mu.size)
             F0 = q["w"] + (q["w"] > 0)
             dv.append(q["f"] - v)
+            fs = [q["f"]]
             kt.append(max(q["kt"].values()))
+            for a in (max(mu.min(), x - 5e-11), min(mu.max(), x + 5e-11)):
+                s = mv.qp(mu, S, a, F0, it=5 * mu.size)
+                fs.append(s["f"])
+                kt.append(max(s["kt"].values()))
+            sep.append(max(0.0, min(fs) - v - 5e-11, v - 5e-11 - max(fs)))
         dv = np.array(dv)
         return {"n": dv.size, "max_abs": float(np.abs(dv).max()), "max_pos": float(dv.max()),
                 "min_neg": float(dv.min()), "half_unit": float(np.mean(np.abs(dv) <= 5e-11)),
-                "max_rel": float(np.max(np.abs(dv) / e["ef"][:, 1])), "kkt": max(kt)}, ip
+                "max_rel": float(np.max(np.abs(dv) / e["ef"][:, 1])), "kkt": max(kt),
+                "rectangles": int(np.count_nonzero(np.array(sep) == 0)),
+                "max_separation": max(sep), "pass": bool(max(sep) == 0 and max(kt) < 1e-12)}, ip
     if kd == "chang":
         e = dat.portef(p["k"])
         ip[e["name"]] = e["sha"]
@@ -81,12 +109,13 @@ def run(key, kd, pa, tl):
         for l in LAM:
             s = mv.f1(mu, S, p["K"], l, e=p["e"], sn="==", tl=tl)
             w = s["w"]
-            pts.append({"lam": l, "st": s["c"]["st"], "g": s["c"]["g"], "y": float(mu @ w),
-                        "x": float(np.sqrt(w @ S @ w)),
-                        "pd": float(mv.pdev(e["ef"], np.sqrt(w @ S @ w), mu @ w))})
+            x, y = (np.nan, np.nan) if w is None else (float(np.sqrt(w @ S @ w)), float(mu @ w))
+            pts.append({"lam": l, "st": s["c"]["st"], "g": s["c"]["g"], "y": y, "x": x,
+                        "pd": float(mv.pdev(e["ef"], x, y))})
         v = np.array([q["pd"] for q in pts])
         v = v[np.isfinite(v)]
-        return {"pts": pts, "median": float(np.median(v)), "mean": float(np.mean(v)),
+        return {"pts": pts, "median": float(np.median(v)) if v.size else None,
+                "mean": float(np.mean(v)) if v.size else None,
                 "n": int(v.size), "all_opt": all(q["st"] == "opt" for q in pts),
                 "chang_V": CH}, ip
     if kd == "g2":
@@ -97,19 +126,21 @@ def run(key, kd, pa, tl):
         inb = q["c"]["bd"] - 1e-9 * abs(s["f"]) <= s["f"] <= q["c"]["f"] + 1e-9 * abs(s["f"])
         return {"scip": crt(s["c"]), "ecp": crt(q["c"]), "scip_f": s["f"], "ecp_f": q["f"],
                 "rel": rel, "both_opt": both, "pass": bool(rel <= 1e-6) if both else None,
-                "in_bracket": bool(inb),
-                "ok": rw.ok(s["w"], s["z"], p["K"], p["e"], 1.0, "==") == []}, ip
+                "in_bracket": bool(inb) if s["w"] is not None else None,
+                "ok": rw.ok(s["w"], s["z"], p["K"], p["e"], 1.0, "==") == []
+                if s["w"] is not None else None}, ip
     if kd == "rq5":
         s = mv.f1(mu, S, p["K"], p["lam"], e=p["e"], sn="==", p=p["p"], tl=tl)
         return {"c": crt(s["c"]), "f": s["f"], "N": int(mu.size)}, ip
     if kd == "f2":
         s = mad.mad(r, p["K"], tl=tl)
         return {"c": crt(s["c"]), "recomputed": s["f"],
-                "diff": abs(s["c"]["f"] - s["f"]), "ok": rw.ok(s["w"], s["z"], p["K"]) == []}, ip
+                "diff": abs(s["c"]["f"] - s["f"]),
+                "ok": rw.ok(s["w"], s["z"], p["K"]) == [] if s["w"] is not None else None}, ip
     if kd == "f3":
         s = cv.cv(r, p["K"], b=p["b"], tl=tl)
         return {"c": crt(s["c"]), "sorted": s["f"], "diff": abs(s["c"]["f"] - s["f"]),
-                "ok": rw.ok(s["w"], s["z"], p["K"]) == []}, ip
+                "ok": rw.ok(s["w"], s["z"], p["K"]) == [] if s["w"] is not None else None}, ip
     if kd == "f4":
         tr, ts = slice(0, 145), slice(145, None)       # Canakgoz-Beasley sec. 4.1
         s = it.it(r[tr], Ri[tr], p["K"], tl=tl)
@@ -144,34 +175,48 @@ def one(a):
 
 
 def table():
-    B = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(OUT.glob("*.json"))}
+    B, src = {}, bd.source(bd.ROOT)
+    for key, kd, pa in cases():
+        b = bd.read(OUT / f"{key}.json")
+        m = b.get("bundle") if b else None
+        pars = m.get("pa") if isinstance(m, dict) else None
+        tl = pars.get("tl") if isinstance(pars, dict) else None
+        if isinstance(tl, (int, float)) and np.isfinite(tl) and tl > 0:
+            b = admit(key, kd, pa, tl, src)
+            if b is not None:
+                B[key] = b
     L = ["# Benchmark results", "",
-         "Generated by `python run_bench.py` from the bundles in `docs/results/bench/`. "
-         "Do not edit by hand.", ""]
+         ("Generated by `python run_bench.py` from admitted bundles in `docs/results/bench/`. "
+          "Do not edit by hand."), ""]
+    if not B:
+        L += ["No current benchmark bundles are admitted.", ""]
 
     def sec(t, hd, rows):
         if rows:
             L.extend([f"## {t}", "", "| " + " | ".join(hd) + " |",
                       "|" + "---|" * len(hd)] + ["| " + " | ".join(x) + " |" for x in rows] + [""])
 
-    f = lambda v, s=".3e": "n/a" if v is None else format(v, s)
-    sec("G1: exact frontier against OR-Library portef", ["case", "points", "max abs diff",
-        "range of diff", "max rel diff", "within 5e-11", "max KKT residual"],
+    f = lambda v, s=".3e": "n/a" if v is None or not np.isfinite(v) else format(v, s)
+    sec("G1: continuous frontier against OR-Library portef", ["case", "points", "max abs diff",
+        "range of diff", "max rel diff", "within 5e-11", "rounding rectangles", "separation",
+        "pass", "max KKT residual"],
         [[k, str(b["n"]), f(b["max_abs"]), f"{b['min_neg']:+.2e} .. {b['max_pos']:+.2e}",
-          f(b["max_rel"]), f"{100 * b['half_unit']:.2f}%", f(b["kkt"], ".1e")]
+          f(b["max_rel"]), f"{100 * b['half_unit']:.2f}%", str(b["rectangles"]),
+          f(b["max_separation"], ".2e"), str(b["pass"]),
+          f(b["kkt"], ".1e")]
          for k, b in B.items() if k.startswith("g1-")])
     if "chang-port1" in B:
         b = B["chang-port1"]
-        sec("Exact CCEF against Chang et al. (2000) Table 4, Hang Seng (port1), K = 10",
+        sec("Supported points against Chang et al. (2000) Table 4, port1, K = 10",
             ["route", "median % error", "mean % error", "points"],
-            [["exact (SCIP, 50 lambda)", f"{b['median']:.4f}", f"{b['mean']:.4f}",
+            [["SCIP, 50 lambda", f(b["median"], ".4f"), f(b["mean"], ".4f"),
               f"{b['n']} (all opt: {b['all_opt']})"]]
             + [[f"Chang {h} heuristic, V", f"{m:.4f}", f"{a:.4f}", "50"]
                for h, (m, a) in b["chang_V"].items()])
     sec("G2: SCIP against extended cutting planes, port1, K = 10, e = 0.01, 1'z = K",
         ["case", "SCIP", "ECP", "ECP masters", "rel diff", "SCIP in ECP bracket", "pass"],
-        [[k, f"{b['scip']['st']} {b['scip_f']:.12e}",
-          f"{b['ecp']['st']} [{b['ecp']['bd']:.10e}, {b['ecp']['f']:.10e}]",
+        [[k, f"{b['scip']['st']} {f(b['scip_f'], '.12e')}",
+          f"{b['ecp']['st']} [{f(b['ecp']['bd'], '.10e')}, {f(b['ecp']['f'], '.10e')}]",
           str(b["ecp"]["it"]), f(b["rel"], ".1e"), str(b["in_bracket"]),
           {True: "yes", False: "NO", None: "not both certified"}[b["pass"]]]
          for k, b in B.items() if k.startswith("g2-")])
@@ -186,7 +231,7 @@ def table():
          for k, b in B.items() if k[:2] in ("f2", "f3")])
     sec("F4 restricted (no transaction costs), Canakgoz-Beasley windows [1,145], [146,290]",
         ["case", "N", "K", "stage 1", "stage 2", "a in", "b in", "a out", "b out", "TE out"],
-        [[k, str(b["N"]), str(B[k]["bundle"]["pa"]["K"]), b["c1"]["st"],
+        [[k, str(b["N"]), str(b["bundle"]["pa"]["K"]), b["c1"]["st"],
           b["c2"]["st"] if b["c2"] else "-", f(b.get("a_in"), ".2e"), f(b.get("b_in"), ".5f"),
           f(b.get("a_out"), ".5f"), f(b.get("b_out"), ".5f"), f(b.get("te_out"), ".3e")]
          for k, b in B.items() if k.startswith("f4-")])
@@ -210,19 +255,34 @@ def main(argv=None):
     a.add_argument("--only", action="append", default=[])
     a.add_argument("--time", type=float, default=60.0)
     a.add_argument("--jobs", type=int, default=1)
+    a.add_argument("--allow-long", action="store_true")
     x = a.parse_args(argv)
+    if not np.isfinite(x.time) or x.time <= 0 or x.jobs < 1:
+        a.error("--time must be finite and positive; --jobs must be positive")
     if x.run:
         code = bd.identity()
         if code["dirty"]:
             raise SystemExit("refusing to write bundles from a dirty tree; commit first")
         todo = [c for c in cases() if not x.only or any(c[0].startswith(o) for o in x.only)]
+        if x.only and any(not any(c[0].startswith(o) for c in cases()) for o in x.only):
+            a.error("--only does not match a public case")
         if x.missing:
-            todo = [c for c in todo if bd.valid(OUT, c[0], c[2] | {"tl": x.time},
-                                                code["source"]) is None]
+            todo = [c for c in todo if admit(*c, x.time, code["source"]) is None]
+        budget = sum({"g1": 0, "chang": 50, "g2": 2, "f4": 2}.get(kd, 1) * x.time
+                     for _, kd, _ in todo)
+        if budget > 1800 and not x.allow_long:
+            raise SystemExit(f"solve budget {budget / 60:.1f} min exceeds 30 minutes; "
+                             "obtain approval and use --allow-long or dispatch the bench workflow")
         args = [(k, kd, pa, x.time, code) for k, kd, pa in todo]
-        with cf.ProcessPoolExecutor(max_workers=x.jobs) as ex:
-            for k, w in ex.map(one, args) if x.jobs > 1 else map(one, args):
+        if x.jobs == 1:
+            for k, w in map(one, args):
                 print(f"{k}: {w:.1f}s", flush=True)
+        else:
+            with cf.ProcessPoolExecutor(max_workers=x.jobs) as ex:
+                fs = [ex.submit(one, a) for a in args]
+                for ft in cf.as_completed(fs):
+                    k, w = ft.result()
+                    print(f"{k}: {w:.1f}s", flush=True)
     table()
 
 

@@ -27,7 +27,7 @@ from pf import crt, rw
 
 def cv(r, K, b=0.95, rho=None, e=0.0, dl=1.0, sn="<=", tl=None, gp=0.0):
     """Solve F3; returns w, z, alpha, the recomputed CVaR and the certificate."""
-    r = np.asarray(r, float)
+    r = rw.rr(r)
     S, N = r.shape
     if not 0 < b < 1:
         raise ValueError("b must lie in (0, 1)")
@@ -53,11 +53,13 @@ def cv(r, K, b=0.95, rho=None, e=0.0, dl=1.0, sn="<=", tl=None, gp=0.0):
 
 def cvar(r, w, b):
     """beta-CVaR of the losses -r_s'w under equal weights 1/S, from the sorted losses."""
+    if not 0 < b < 1:
+        raise ValueError("b must lie in (0, 1)")
     L = np.sort(-(np.asarray(r, float) @ w))
     S = L.size
     m = (1 - b) * S                      # probability mass of the tail, in scenarios
-    k = int(np.floor(m + 1e-12))
+    k = int(np.floor(m))
     tt = L[S - k:].sum() if k else 0.0
     fr = m - k                           # fractional atom at the beta-quantile
-    atom = L[S - k - 1] * fr if fr > 1e-12 else 0.0
+    atom = L[S - k - 1] * fr if fr > 0 else 0.0
     return float((tt + atom) / m)

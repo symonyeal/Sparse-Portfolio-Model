@@ -115,3 +115,67 @@ def test_invalid_cli_limits_are_rejected(args, monkeypatch):
     with pytest.raises(SystemExit) as e:
         run_bench.main(args)
     assert e.value.code != 0
+
+
+def test_table_admits_matching_inputs_and_formats_missing_incumbent(repo, monkeypatch):
+    key = "g2-port1-lam0.25"
+    pa = {"k": 1, "K": 10, "e": .01, "lam": .25, "tl": 60.0}
+    ip = {"port1": run_bench.dat.sha256(run_bench.dat.ORLIB / "port1.txt")}
+    c = {"st": "limit", "f": None, "bd": None, "it": 0}
+    r = {"scip": c, "ecp": c, "scip_f": None, "ecp_f": None,
+         "rel": None, "in_bracket": None, "pass": None}
+    out = repo / "bundles"
+    bd.write(out, bd.bundle(key, pa, r, ip, [], bd.identity(repo)))
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(bd, "ROOT", repo)
+    monkeypatch.setattr(run_bench, "OUT", out)
+    run_bench.table()
+    p = repo / "docs/results/README.md"
+    assert "limit n/a" in p.read_text(encoding="utf-8")
+    b = bd.read(out / f"{key}.json")
+    b["bundle"]["inputs"]["port1"] = "stale"
+    bd.write(out, b)
+    (out / "broken.json").write_text("{", encoding="utf-8")
+    run_bench.table()
+    assert key not in p.read_text(encoding="utf-8")
+
+
+def test_resume_uses_current_input_hashes(repo, monkeypatch):
+    key = "g1-port1"
+    ip = {n: run_bench.dat.sha256(run_bench.dat.ORLIB / f"{n}.txt")
+          for n in ("port1", "portef1")}
+    out = repo / "bundles"
+    b = bd.bundle(key, {"k": 1, "tl": 10.0}, {}, ip, [], bd.identity(repo))
+    bd.write(out, b)
+    monkeypatch.setattr(bd, "ROOT", repo)
+    monkeypatch.setattr(run_bench, "OUT", out)
+    monkeypatch.setattr(run_bench, "table", lambda: None)
+    monkeypatch.setattr(bd, "identity", lambda: b["bundle"]["code"])
+    ran = []
+    monkeypatch.setattr(run_bench, "one", lambda a: (ran.append(a[0]) or a[0], 0.0))
+    args = ["--run", "--missing", "--only", key, "--time", "10"]
+    run_bench.main(args)
+    assert ran == []
+    b["bundle"]["inputs"]["port1"] = "stale"
+    bd.write(out, b)
+    run_bench.main(args)
+    assert ran == [key]
+
+
+@pytest.mark.parametrize("args", [["--only", "chang-port1", "--time", "60"],
+                                  ["--only", "f4", "--time", "200"]])
+def test_long_batch_requires_explicit_override(repo, monkeypatch, args):
+    code = bd.identity(repo)
+    monkeypatch.setattr(bd, "identity", lambda: code)
+    monkeypatch.setattr(run_bench, "table", lambda: None)
+    monkeypatch.setattr(run_bench, "OUT", repo / "bundles")
+    monkeypatch.setattr(run_bench, "one", lambda a: (a[0], 0.0))
+    with pytest.raises(SystemExit, match="30 minutes"):
+        run_bench.main(["--run", *args])
+
+
+def test_unknown_case_is_not_a_successful_empty_run(repo, monkeypatch):
+    code = bd.identity(repo)
+    monkeypatch.setattr(bd, "identity", lambda: code)
+    with pytest.raises(SystemExit):
+        run_bench.main(["--run", "--only", "typo"])

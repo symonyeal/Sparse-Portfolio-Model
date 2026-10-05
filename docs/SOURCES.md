@@ -1,8 +1,7 @@
 # Sources
 
-Status, as checked on 2 October 2026: **opened** (the full text was read; the version is named
-when it is not the journal's), **abstract only**, or **not opened**. Records were corrected
-against Crossref. A formulation that results depend on cites only opened sources.
+Status on 2 October 2026: opened (full text read, with the version named), abstract only,
+or not opened. Records were corrected against Crossref. Formulations cite opened sources.
 
 ## Formulations and algorithms
 
@@ -58,7 +57,7 @@ against Crossref. A formulation that results depend on cites only opened sources
 
 ## Prior work and existing software
 
-Two searches on 2 October 2026 found no study that evaluates optimal $K$-name portfolios by
+Two searches on 2 October 2026 found no study evaluating optimal $K$-name portfolios by
 Bessembinder's long-horizon measure on a delisting-inclusive universe; no priority is claimed.
 Riskfolio-Lib (`Portfolio.py`, `card`) and skfolio (`_mixed_integer_constraints`, a minimum-CVaR
 example with `cardinality=5`) implement cardinality constraints already; they are cross-checks,

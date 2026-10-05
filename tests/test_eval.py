@@ -59,7 +59,7 @@ def hand(n=12, N=4, seed=0):
     R[8:, 3] = np.nan                                  # stock 3 delists after month 7
     ME = np.where(np.isnan(R), np.nan, g.uniform(1, 10, (n, N)))
     return bt.P(np.arange(n) + 200001, np.arange(N) + 1, np.arange(N) + 1, R, ME,
-                np.full(n, 0.002))
+                np.full(n, 0.002), ls=[n, n, n, 7])
 
 
 def test_hold_moves_delisted_proceeds_to_cash():

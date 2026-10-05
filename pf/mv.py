@@ -15,8 +15,6 @@ pi = th l_min with th = 0.999 keeps Q positive definite at any scale.
 the active set; it is the exact reference for gate G1.
 """
 
-import time
-
 import numpy as np
 
 from pf import crt, rw
@@ -27,7 +25,7 @@ from pf import crt, rw
 # lam    : risk-return weight of Chang et al. (2000), in [0, 1]
 # rho, rs: required return and the sense of its row (None: no return row)
 # p      : True for the perspective formulation F1p
-# Q, pi  : perspective split S = Q + diag(pi), Q positive definite, pi >= 0
+# Q, pi  : perspective split S = Q + diag(pi), Q positive semidefinite, pi >= 0
 # th     : fraction of the least eigenvalue placed in pi
 # v      : epigraph variable of w'Sw (F1) or of w'Qw + pi't (F1p)
 # t      : perspective variables, w_i^2 <= t_i z_i
@@ -47,10 +45,14 @@ def obj(w, mu, S, lam):
 
 def split(S, th=TH):
     """Frangioni-Gentile diagonal split S = Q + diag(pi), pi = th * l_min(S) * 1."""
+    S = np.asarray(S, float)
+    if S.ndim != 2:
+        raise ValueError("S must be a covariance matrix")
+    _, S = rw.ms(np.zeros(S.shape[0]), S)
+    if not np.isfinite(th) or not 0 <= th <= 1:
+        raise ValueError("th must lie in [0, 1]")
     l = np.linalg.eigvalsh(S)[0]
-    if l <= 0:
-        raise ValueError(f"S is not positive definite (least eigenvalue {l:g})")
-    pi = np.full(S.shape[0], th * l)
+    pi = np.full(S.shape[0], th * max(0.0, l))
     return S - np.diag(pi), pi
 
 
@@ -58,20 +60,19 @@ def f1(mu, S, K, lam, e=0.0, d=1.0, sn="<=", rho=None, rs="==", p=False, tl=None
        ft=1e-9, sol=None):
     """Solve F1 (p=False) or F1p (p=True) with SCIP; returns w, z, f and the certificate."""
     from pyscipopt import Model, quicksum
-    mu, S = np.asarray(mu, float), np.asarray(S, float)
+    mu, S = rw.ms(mu, S)
+    crt.limits(tl, gp)
     N = mu.size
     if not 0 <= lam <= 1:
         raise ValueError("lam must lie in [0, 1]")
     B = rw.X(N, K, e, d, sn)
-    sg = 1.0 / np.mean(np.diag(S))      # objective scale: SCIP's tolerances are absolute below 1
+    sg = rw.scale(S)                    # SCIP's tolerances are absolute below 1
     Ss, ms = sg * S, sg * mu
     m = Model()
     m.hideOutput()
     m.setParam("numerics/feastol", ft)
     m.setParam("limits/gap", gp)
     m.setParam("limits/absgap", 0.0)
-    if tl is not None:
-        m.setParam("limits/time", float(tl))
     w = [m.addVar(f"w{i}", lb=0.0, ub=float(B["ub"][i])) for i in range(N)]
     z = [m.addVar(f"z{i}", vtype="B") for i in range(N)]
     v = m.addVar("v", lb=0.0)
@@ -88,15 +89,13 @@ def f1(mu, S, K, lam, e=0.0, d=1.0, sn="<=", rho=None, rs="==", p=False, tl=None
     else:
         m.addCons(v >= quicksum(Ss[i, j] * w[i] * w[j] for i in range(N) for j in range(N)))
     m.setObjective(lam * v - quicksum((1 - lam) * ms[i] * w[i] for i in range(N)), "minimize")
-    if sol is not None:
+    if sol is not None and tl != 0:
         s0 = m.createSol()
         for i in range(N):
             m.setSolVal(s0, w[i], sol[0][i])
             m.setSolVal(s0, z[i], sol[1][i])
         m.addSol(s0)
-    t0 = time.perf_counter()
-    m.optimize()
-    c = crt.un(crt.sc(m, "min", t=time.perf_counter() - t0), sg)
+    c = crt.un(crt.so(m, "min", tl), sg)
     if m.getNSols() == 0:
         return {"w": None, "z": None, "f": np.nan, "c": c}
     s = m.getBestSol()
@@ -151,10 +150,20 @@ def shrink(y):
     k = (pi - rho) / gamma. S is the sample covariance with divisor T, the normalisation the
     appendix's estimators pi_ij and theta use. Returns (shrunk matrix, intensity).
     """
-    y = np.asarray(y, float)
+    y = rw.rr(y)
     T, N = y.shape
     x = y - y.mean(axis=0)
     S = x.T @ x / T
+    active = np.flatnonzero(np.ptp(y, axis=0) > 0)
+    if active.size < N:
+        out = np.zeros_like(S)
+        if active.size:
+            sub, dl = shrink(y[:, active])
+            out[np.ix_(active, active)] = sub
+            return out, dl
+        return out, 0.0
+    if N == 1:
+        return S, 0.0
     s = np.sqrt(np.diag(S))
     r = S / np.outer(s, s)
     rb = (r.sum() - N) / (N * (N - 1))
@@ -168,6 +177,8 @@ def shrink(y):
                                   + np.sum((s[:, None] / s[None, :]) * th.T)
                                   - 2 * np.trace(th))
     ga = np.sum((F - S) ** 2)
+    if ga == 0:
+        return S, 0.0
     dl = max(0.0, min((pi - rho) / ga / T, 1.0))
     return dl * F + (1 - dl) * S, dl
 
