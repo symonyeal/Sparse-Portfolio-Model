@@ -53,3 +53,7 @@ Ordinary deterministic solver fixtures retain their weights and recomputed objec
 cleanup; timing and certificate metadata are excluded from that comparison. Corrections
 cover singular and deterministic inputs, tiny CVaR tails, unavailable observations and
 numerical cancellation in Sharpe inference.
+
+Eight admitted public bundles cover port1 G1/G2, F1/F1p at $K=5$, F2/F3 at $K=5$, restricted
+F4 on indtrack1 and the small F5 grid. The G2 case meets relative objective agreement;
+its stricter bracket-inclusion diagnostic fails. Both diagnostics remain in the table.
