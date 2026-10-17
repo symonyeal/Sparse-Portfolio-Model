@@ -13,7 +13,7 @@ Codex reads the same file through [AGENTS.md](AGENTS.md).
 | Report no solve outcome that was not read back from the result: status, primal value, dual bound, achieved gap. | A requested tolerance is not a result. HiGHS stops at `mip_rel_gap = 1e-4` by default. |
 | Take a bound only from the solver's dual bound (`mip_dual_bound`; SCIP `getDualbound`), never from an incumbent. | An incumbent can understate the optimum. |
 | Name a failed solve by the solver's status: infeasible, limit, unbounded, numerical. | Bad data and an empty feasible set both end in failure. |
-| Re-solve with presolve off whenever infeasibility is reported. | HiGHS presolve declared feasible programs infeasible in Electricity-Market-Model. |
+| Re-solve with presolve off whenever infeasibility is reported. | HiGHS presolve declared feasible programs infeasible in Electricity-Clearing-and-Pricing. |
 | Reject a certificate whose bounds cross by more than the tolerance. | A dual bound past the primal value is a defect. |
 | Report a solve that hit its time limit as `limit`, with its gap. | It is not optimal. |
 | Cite only what [Sources](docs/SOURCES.md) records as opened, and add the entry in the change that uses it. | A formulation is validated by the paper it implements, not by the solver that ran it. |

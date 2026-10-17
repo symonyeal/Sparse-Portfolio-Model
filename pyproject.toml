@@ -1,5 +1,5 @@
 [project]
-name = "sparse-portfolio-model"
+name = "sparse-portfolio-optimization"
 version = "0.1.0"
 description = "Cardinality-constrained portfolio selection evaluated by long-horizon wealth creation"
 license = "MIT"

@@ -1,4 +1,4 @@
-# Sparse-Portfolio-Model
+# Sparse Portfolio Optimization
 
 Cardinality-constrained portfolio models with solver bounds, independent checks and a
 framework for evaluating long-horizon outcomes on a universe that includes delisted firms.

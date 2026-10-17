@@ -110,7 +110,8 @@ def mi(c, A, lo, hi, lb, ub, it, tl=None, gp=0.0, ps=True):
     """Minimise c'x over the rows with scipy.optimize.milp (HiGHS); returns (x, certificate).
 
     A reported infeasibility is read back from a second solve with presolve off: HiGHS presolve
-    declared feasible programs infeasible in Electricity-Market-Model.
+    declared feasible programs infeasible in
+    Electricity-Clearing-and-Pricing.
     """
     limits(tl, gp)
     if tl == 0:
